@@ -1,0 +1,132 @@
+    - name: Update APT package cache
+      apt:
+        update_cache: yes
+
+    - name: Upgrade APT packages
+      apt:
+        upgrade: yes
+
+    - name: Change hostname
+      hostname:
+        name: "{{ hostname }}"
+
+    - name: Set timezone
+      timezone:
+        name: Asia/Kolkata
+
+    - name: Install required packages
+      package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - net-tools
+        - unzip
+
+    - name: Create user
+      user:
+        name: "{{ username }}"
+        password: "{{ password | password_hash('sha512') }}"
+        groups: sudo
+        shell: /bin/bash
+        createhome: yes
+      notify: restart sshd
+
+    - name: Set permissions for home directory
+      file:
+        path: "/home/{{ username }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+        recurse: yes
+      notify: restart sshd
+
+    - name: Enable PasswordAuthentication in sshd_config
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+      notify: restart sshd
+
+    - name: Enable KbdInteractiveAuthentication in sshd_config
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?KbdInteractiveAuthentication'
+        line: 'KbdInteractiveAuthentication yes'
+      notify: restart sshd
+
+    - name: Install wget package
+      apt:
+        name: wget
+        state: latest
+        update_cache: yes
+      become: yes
+
+    - name: Download node exporter
+      command: wget https://github.com/prometheus/node_exporter/releases/download/v{{version}}/node_exporter-{{version}}.linux-amd64.tar.gz
+
+    - name: Extract node exporter archieve
+      command: tar xvfz node_exporter-{{version}}.linux-amd64.tar.gz
+
+    - name: Move node-exporter to /usr/local/bin
+      command: mv node_exporter-{{version}}.linux-amd64/node_exporter /usr/local/bin/
+      become: yes
+
+    - name: Create node_exporter user
+      user:
+        name: node_exporter
+        system: yes
+        create_home: no
+        shell: /bin/false
+      become: yes
+
+    - name: Copy node_exporter.service file to /etc/systemd/system
+      copy:
+        src: /home/ubuntu/test/test/node_exporter.service
+        dest: /etc/systemd/system/node_exporter.service
+        mode: '0644'
+      become: yes
+
+    - name: Restart and enable node exporter service
+      systemd:
+        name: node_exporter
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+      become: yes
+
+    - name: Download Promtail binary
+      get_url:
+        url: "https://github.com/grafana/loki/releases/download/v2.4.1/promtail-linux-amd64.zip"
+        dest: "/tmp/promtail-linux-amd64.zip"
+
+    - name: Unzip Promtail binary
+      unarchive:
+        src: "/tmp/promtail-linux-amd64.zip"
+        dest: "/usr/local/bin"
+        remote_src: yes
+      notify: restart promtail
+
+    - name: Create directories for Promtail config and logs
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - "/etc/promtail"
+        - "/var/log/promtail"
+
+    - name: Create Promtail configuration file
+      copy:
+        src: promtail-config.yml
+        dest: "/etc/promtail/promtail-config.yml"
+      notify: restart promtail
+
+    - name: Create Promtail systemd service file
+      copy:
+        src: promtail.service
+        dest: "/etc/systemd/system/promtail.service"
+      notify: restart promtail
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes

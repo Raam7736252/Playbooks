@@ -1,0 +1,7 @@
+#Node exPorter Version
+version: 1.4.0
+#Hostname of the machine
+hostname: "dev-server"
+#username for new user
+username: "devops"
+password: "123456789"
